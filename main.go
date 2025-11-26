@@ -27,12 +27,12 @@ func main() {
     http.HandleFunc("/submit", handleBooking)
     http.HandleFunc("/question", handleQuestion)
 
-    log.Println("Server starting on :8080")
-    log.Fatal(http.ListenAndServe(":8080", nil))
+    log.Println("Server starting on :8081")
+    log.Fatal(http.ListenAndServe(":8081", nil))
 }
 
 func enableCORS(w http.ResponseWriter, r *http.Request) {
-    w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
+    w.Header().Set("Access-Control-Allow-Origin", "https://davispics.com")
     w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
     w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
