@@ -66,7 +66,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	defer r.Body.Close()
 
-	err := UploadImages(r)
+	uploadedURLs, err := UploadImages(r)
 	if err != nil {
 		log.Printf("Upload error: %v\n", err)
 		w.WriteHeader(http.StatusBadRequest)
@@ -76,7 +76,10 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "Images uploaded successfully!"})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Images uploaded successfully!",
+		"urls": uploadedURLs,
+	})
 }
 
 func handleSubmit(w http.ResponseWriter, r *http.Request, target Submittable, action string) {

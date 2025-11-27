@@ -53,49 +53,62 @@ func InitS3Client() error {
 	return nil
 }
 
-func UploadImages(r *http.Request) error {
+func UploadImages(r *http.Request) ([]string, error) {
 	// Parse multipart form (32MB max memory)
 	err := r.ParseMultipartForm(32 << 20)
 	if err != nil {
-		return fmt.Errorf("failed to parse form data: %w", err)
+		return nil, fmt.Errorf("failed to parse form data: %w", err)
 	}
 
 	// Get form values
+	password := r.FormValue("password")
 	maxDimensionStr := r.FormValue("maxDimension")
 	folder := r.FormValue("folder")
+
+	// validate password
+	expectedPassword := os.Getenv("UPLOAD_PASSWORD")
+	if expectedPassword == "" {
+		return nil, fmt.Errorf("Server config error: No upload password set")
+	}
+	if password != expectedPassword {
+		return nil, fmt.Errorf("Invalid password")
+	}
 
 	maxDimension := 0
 	if maxDimensionStr != "" {
 		maxDimension, err = strconv.Atoi(maxDimensionStr)
 		if err != nil || maxDimension <= 0 {
-			return fmt.Errorf("invalid maxDimension value")
+			return nil, fmt.Errorf("Invalid maxDimension value")
 		}
 	}
 
 	if folder == "" {
-		return fmt.Errorf("folder name is required")
+		return nil, fmt.Errorf("Folder name is required")
 	}
 
 	files := r.MultipartForm.File["images"]
 	if len(files) == 0 {
-		return fmt.Errorf("no files provided")
+		return nil, fmt.Errorf("No files provided")
 	}
 
 	log.Printf("Received %d files for folder '%s' with maxDimension %d\n", len(files), folder, maxDimension)
 
+	var uploadedURLs []string
 	for _, fileHeader := range files {
 		// Validate file type
 		if !isValidImageType(fileHeader) {
-			return fmt.Errorf("invalid file type: %s (only PNG and JPEG allowed)", fileHeader.Filename)
+			return nil, fmt.Errorf("Invalid file type: %s (only PNG and JPEG allowed)", fileHeader.Filename)
 		}
 
 		// Upload to R2
-		if err := uploadToR2(fileHeader, folder, maxDimension); err != nil {
-			return fmt.Errorf("failed to upload %s: %w", fileHeader.Filename, err)
+		url, err := uploadToR2(fileHeader, folder, maxDimension)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to upload %s: %w", fileHeader.Filename, err)
 		}
+		uploadedURLs = append(uploadedURLs, url)
 	}
 
-	return nil
+	return uploadedURLs, nil
 }
 
 func isValidImageType(fileHeader *multipart.FileHeader) bool {
@@ -103,17 +116,17 @@ func isValidImageType(fileHeader *multipart.FileHeader) bool {
 	return contentType == "image/png" || contentType == "image/jpeg"
 }
 
-func uploadToR2(fileHeader *multipart.FileHeader, folder string, maxDimension int) error {
+func uploadToR2(fileHeader *multipart.FileHeader, folder string, maxDimension int) (string, error) {
 	file, err := fileHeader.Open()
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer file.Close()
 
 	// Decode image
 	img, format, err := image.Decode(file)
 	if err != nil {
-		return fmt.Errorf("failed to decode image: %w", err)
+		return "", fmt.Errorf("failed to decode image: %w", err)
 	}
 
 	// Resize if maxDimension is specified
@@ -132,11 +145,11 @@ func uploadToR2(fileHeader *multipart.FileHeader, folder string, maxDimension in
 		err = png.Encode(&buf, img)
 		contentType = "image/png"
 	} else {
-		return fmt.Errorf("unsupported image format: %s", format)
+		return "", fmt.Errorf("unsupported image format: %s", format)
 	}
 
 	if err != nil {
-		return fmt.Errorf("failed to encode image: %w", err)
+		return "", fmt.Errorf("failed to encode image: %w", err)
 	}
 
 	bucket := os.Getenv("R2_BUCKET_NAME")
@@ -150,11 +163,12 @@ func uploadToR2(fileHeader *multipart.FileHeader, folder string, maxDimension in
 	})
 
 	if err != nil {
-		return err
+		return "", err
 	}
+	publicURL := fmt.Sprintf("%s/%s", os.Getenv("R2_PUBLIC_URL"), key)
 
 	log.Printf("Uploaded %s to R2 as %s\n", fileHeader.Filename, key)
-	return nil
+	return publicURL, nil
 }
 
 func resizeImage(img image.Image, maxDimension int) image.Image {
